@@ -26,22 +26,23 @@
     button.save { background: #238636; border-color: #2ea043; width: 100%; padding: 12px; font-size: 1rem; font-weight: 600; margin-top: 10px; }
     button.save:hover { background: #2ea043; }
 
-    /* Previsualizador y Capturador de tiempo */
-    #preview-area { margin-top: 14px; display: none; }
+    /* Mensajes y Avisos Integrados */
+    .banner { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 12px; display: none; }
+    .banner.err { background: #4c1d1d; color: #f85149; border: 1px solid #da3633; }
+    .banner.ok { background: #1e4620; color: #7ee787; border: 1px solid #2ea043; }
+
+    /* Preview y Captura */
+    #preview-area { margin-top: 10px; display: none; }
     .preview-box { width: 100%; height: 320px; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px; }
-    .capture-buttons { display: flex; gap: 8px; margin-bottom: 10px; }
+    .capture-buttons { display: flex; gap: 8px; margin-bottom: 12px; }
     .capture-buttons button { flex: 1; background: #333; }
 
-    /* Lista arrastrable y ordenable */
+    /* Lista arrastrable */
     .clip-row { display: flex; align-items: center; justify-content: space-between; background: #242424; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border: 1px solid #333; cursor: grab; }
     .clip-row.dragging { opacity: 0.4; }
     .clip-data { display: flex; align-items: center; gap: 10px; overflow: hidden; }
     .clip-actions { display: flex; gap: 6px; }
     .btn-icon { padding: 4px 8px; font-size: 0.8rem; }
-
-    .status { padding: 10px; border-radius: 6px; margin-top: 10px; font-size: 0.9rem; display: none; }
-    .status.ok { background: #1e4620; color: #7ee787; }
-    .status.err { background: #4c1d1d; color: #f85149; }
   </style>
 </head>
 <body>
@@ -57,7 +58,7 @@
       <div class="grid-2">
         <div>
           <label>Usuario / Organización:</label>
-          <input type="text" id="gh-owner" placeholder="ej: mi-usuario">
+          <input type="text" id="gh-owner" placeholder="ej: rbarcala">
         </div>
         <div>
           <label>Repositorio:</label>
@@ -76,10 +77,12 @@
     <div class="card">
       <h2 id="form-mode-title">2. Agregar o Editar Clip</h2>
       <input type="hidden" id="editing-index" value="-1">
+
+      <div id="form-alert" class="banner err"></div>
       
-      <label>URL o ID de YouTube:</label>
+      <label>URL o ID de YouTube: (*obligatorio)</label>
       <div style="display: flex; gap: 8px;">
-        <input type="text" id="clip-url" placeholder="https://www.youtube.com/watch?v=...">
+        <input type="text" id="clip-url" placeholder="Soporta enlaces normales, /live/, /shorts/ o ID" oninput="onUrlInput()">
         <button type="button" style="height: fit-content;" onclick="loadPreview()">Cargar Video</button>
       </div>
 
@@ -96,23 +99,23 @@
 
       <div class="grid-2">
         <div>
-          <label>Título del Clip:</label>
-          <input type="text" id="clip-title" placeholder="Ej: Introducción / Solo de guitarra">
+          <label>Título del Clip: <span style="color:#777;">(opcional)</span></label>
+          <input type="text" id="clip-title" placeholder="Si lo dejás vacío se asigna automáticamente">
         </div>
         <div>
-          <label>Categoría / Tag:</label>
-          <input type="text" id="clip-category" placeholder="Ej: Música, Podcast, Estudio">
+          <label>Categoría / Tag: <span style="color:#777;">(opcional)</span></label>
+          <input type="text" id="clip-category" placeholder="General">
         </div>
       </div>
 
       <div class="grid-2">
         <div>
-          <label>Inicio (segundos o MM:SS):</label>
-          <input type="text" id="clip-start" placeholder="00:30">
+          <label>Inicio (MM:SS o segundos): (*obligatorio)</label>
+          <input type="text" id="clip-start" placeholder="ej: 13:49 o 829">
         </div>
         <div>
-          <label>Fin (segundos o MM:SS):</label>
-          <input type="text" id="clip-end" placeholder="01:15">
+          <label>Fin (MM:SS o segundos): (*obligatorio)</label>
+          <input type="text" id="clip-end" placeholder="ej: 23:03 o 1383">
         </div>
       </div>
 
@@ -130,12 +133,12 @@
           <button onclick="exportJSON()" style="font-size:0.75rem;">📥 Descargar JSON</button>
         </div>
       </div>
-      <p style="font-size:0.8rem; color:#888; margin-bottom:10px;">Podés arrastrar los elementos o usar las flechas para ordenar la lista.</p>
+      <p style="font-size:0.8rem; color:#888; margin-bottom:10px;">Arrastrá las tarjetas o usá las flechas para ordenar la reproducción.</p>
       
       <div id="clips-drag-list">Cargando clips...</div>
 
       <button class="save" onclick="syncWithGitHub()">💾 Publicar Cambios en GitHub Pages</button>
-      <div id="sync-status" class="status"></div>
+      <div id="sync-status" class="banner" style="margin-top:10px;"></div>
     </div>
   </div>
 
@@ -150,6 +153,17 @@
     document.getElementById('gh-repo').value = localStorage.getItem('c_repo') || '';
     document.getElementById('gh-token').value = localStorage.getItem('c_token') || '';
 
+    function showFormMsg(msg, isError = true) {
+      const el = document.getElementById('form-alert');
+      el.style.display = 'block';
+      el.className = isError ? 'banner err' : 'banner ok';
+      el.innerText = msg;
+    }
+
+    function clearFormMsg() {
+      document.getElementById('form-alert').style.display = 'none';
+    }
+
     function saveGHConfig() {
       localStorage.setItem('c_owner', document.getElementById('gh-owner').value.trim());
       localStorage.setItem('c_repo', document.getElementById('gh-repo').value.trim());
@@ -163,7 +177,8 @@
       const str = val.toString().trim();
       if (str.includes(':')) {
         const p = str.split(':').map(Number);
-        return p.length === 2 ? p[0] * 60 + p[1] : p[0] * 3600 + p[1] * 60 + p[2];
+        if (p.length === 2) return (p[0] || 0) * 60 + (p[1] || 0);
+        if (p.length === 3) return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
       }
       return parseInt(str, 10) || 0;
     }
@@ -174,15 +189,37 @@
       return `${m}:${sec < 10 ? '0' : ''}${sec}`;
     }
 
+    // Extracción tolerante con /watch, /live/, /shorts/, youtu.be y strings directos
     function extractId(url) {
-      const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-      return m ? m[1] : url.trim();
+      if (!url) return '';
+      const str = url.trim();
+      if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
+      const m = str.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/|shorts\/))([a-zA-Z0-9_-]{11})/);
+      return m ? m[1] : '';
     }
 
-    /* Player de Admin para captura de tiempos */
-    function loadPreview() {
+    async function onUrlInput() {
+      clearFormMsg();
       const id = extractId(document.getElementById('clip-url').value);
-      if (!id) return alert('Ingresá una URL de YouTube válida');
+      if (id && !document.getElementById('clip-title').value.trim()) {
+        try {
+          const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${id}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.title && !document.getElementById('clip-title').value.trim()) {
+              document.getElementById('clip-title').value = data.title;
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    function loadPreview() {
+      clearFormMsg();
+      const id = extractId(document.getElementById('clip-url').value);
+      if (!id) {
+        return showFormMsg('URL o ID de YouTube inválido. Asegurate de que sea un video válido.');
+      }
 
       document.getElementById('preview-area').style.display = 'block';
 
@@ -200,24 +237,34 @@
 
     function captureTimestamp(type) {
       if (!adminPlayer || !adminPlayer.getCurrentTime) {
-        return alert('Cargá y reproducí el video primero.');
+        return showFormMsg('Cargá y reproducí el video primero para capturar el segundo.');
       }
+      clearFormMsg();
       const sec = Math.floor(adminPlayer.getCurrentTime());
       if (type === 'start') document.getElementById('clip-start').value = formatTime(sec);
       if (type === 'end') document.getElementById('clip-end').value = formatTime(sec);
     }
 
-    /* Formulario: Alta o Edición */
     function submitClipForm() {
+      clearFormMsg();
       const editIdx = parseInt(document.getElementById('editing-index').value);
-      const title = document.getElementById('clip-title').value.trim();
       const id = extractId(document.getElementById('clip-url').value);
+      let title = document.getElementById('clip-title').value.trim();
       const category = document.getElementById('clip-category').value.trim() || 'General';
       const start = parseTime(document.getElementById('clip-start').value);
       const end = parseTime(document.getElementById('clip-end').value);
 
-      if (!title || !id || end <= start) {
-        return alert('Datos incompletos o inválidos: el final debe ser mayor al inicio.');
+      if (!id) {
+        return showFormMsg('URL o ID de video no reconocido. Pegá una URL válida de YouTube.');
+      }
+
+      if (end <= start) {
+        return showFormMsg(`El tiempo de fin (${formatTime(end)}) debe ser mayor al de inicio (${formatTime(start)}).`);
+      }
+
+      // Título opcional con fallback automático
+      if (!title) {
+        title = `Clip (${formatTime(start)} - ${formatTime(end)})`;
       }
 
       const clipData = { id, title, start, end, category };
@@ -233,9 +280,10 @@
     }
 
     function editClip(idx) {
+      clearFormMsg();
       const c = clips[idx];
       document.getElementById('editing-index').value = idx;
-      document.getElementById('form-mode-title').innerText = `✏️ Editando: "${c.title}"`;
+      document.getElementById('form-mode-title').innerText = `✏️ Editando Clip #${idx + 1}`;
       document.getElementById('btn-submit').innerText = '✓ Guardar Cambios';
       document.getElementById('btn-cancel-edit').style.display = 'inline-block';
 
@@ -249,6 +297,7 @@
     }
 
     function cancelEdit() {
+      clearFormMsg();
       document.getElementById('editing-index').value = '-1';
       document.getElementById('form-mode-title').innerText = '2. Agregar Nuevo Clip';
       document.getElementById('btn-submit').innerText = '➕ Guardar en Lista';
@@ -261,7 +310,6 @@
       document.getElementById('clip-end').value = '';
     }
 
-    /* Ordenamiento: flechas y drag & drop */
     function moveClip(idx, dir) {
       const target = idx + dir;
       if (target < 0 || target >= clips.length) return;
@@ -271,24 +319,22 @@
     }
 
     function deleteClip(idx) {
-      if (confirm(`¿Eliminar "${clips[idx].title}"?`)) {
-        clips.splice(idx, 1);
-        renderAdminList();
-      }
+      clips.splice(idx, 1);
+      renderAdminList();
     }
 
     function renderAdminList() {
       document.getElementById('total-count').innerText = clips.length;
       const container = document.getElementById('clips-drag-list');
       if (clips.length === 0) {
-        container.innerHTML = '<p style="color:#666;">No hay clips en la lista.</p>';
+        container.innerHTML = '<p style="color:#666;">No hay clips cargados.</p>';
         return;
       }
 
       container.innerHTML = clips.map((c, i) => `
         <div class="clip-row" draggable="true" data-index="${i}">
           <div class="clip-data">
-            <span style="color:#666; font-size:0.8rem;">☰</span>
+            <span style="color:#666; font-size:0.9rem;">☰</span>
             <div>
               <strong>${c.title}</strong>
               <div style="font-size:0.75rem; color:#aaa;">${formatTime(c.start)} a ${formatTime(c.end)} | <em>${c.category || 'General'}</em></div>
@@ -329,7 +375,6 @@
       });
     }
 
-    /* Conexión GitHub */
     async function loadClipsData() {
       const owner = localStorage.getItem('c_owner');
       const repo = localStorage.getItem('c_repo');
@@ -363,18 +408,22 @@
       const status = document.getElementById('sync-status');
 
       if (!owner || !repo || !token) {
-        return alert('Configurá y guardá el usuario, repo y token en el paso 1.');
+        status.style.display = 'block';
+        status.className = 'banner err';
+        status.innerText = 'Configurá usuario, repositorio y token en el paso 1.';
+        return;
       }
 
       status.style.display = 'block';
-      status.className = 'status';
-      status.innerText = 'Publicando en GitHub...';
+      status.className = 'banner';
+      status.style.background = '#333';
+      status.innerText = 'Publicando cambios en GitHub...';
 
       const jsonStr = JSON.stringify(clips, null, 2);
       const base64Content = btoa(unescape(encodeURIComponent(jsonStr)));
 
       try {
-        const body = { message: "Actualizar lista ordenada de clips", content: base64Content };
+        const body = { message: "Actualizar lista de clips", content: base64Content };
         if (fileSha) body.sha = fileSha;
 
         const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/clips.json`, {
@@ -390,16 +439,16 @@
         if (res.ok) {
           const resData = await res.json();
           fileSha = resData.content.sha;
-          status.className = 'status ok';
-          status.innerText = '✓ ¡Lista sincronizada y publicada en GitHub Pages con éxito!';
+          status.className = 'banner ok';
+          status.innerText = '✓ ¡Sincronizado con éxito! El reproductor público ya tiene los cambios.';
         } else {
           const err = await res.json();
-          status.className = 'status err';
+          status.className = 'banner err';
           status.innerText = `Error: ${err.message}`;
         }
       } catch (e) {
-        status.className = 'status err';
-        status.innerText = `Fallo de red: ${e.message}`;
+        status.className = 'banner err';
+        status.innerText = `Fallo de conexión: ${e.message}`;
       }
     }
 
