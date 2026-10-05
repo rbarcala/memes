@@ -12,7 +12,7 @@
 
     header { max-width: 1200px; margin: 0 auto 20px; display: flex; justify-content: space-between; align-items: center; }
     h1 { font-size: 1.4rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-    .admin-link { color: #888; text-decoration: none; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; background: #222; }
+    .admin-link { color: #888; text-decoration: none; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; background: #222; transition: 0.2s; }
     .admin-link:hover { color: #fff; background: #333; }
 
     /* Reproductor */
@@ -22,22 +22,24 @@
     
     .current-details { margin-top: 14px; background: #1a1a1a; padding: 16px; border-radius: 10px; }
     .current-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 6px; }
-    .current-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: #aaa; }
-    .btn-share { background: #2a2a2a; border: 1px solid #444; color: #eee; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
-    .btn-share:hover { background: #3a3a3a; }
+    .current-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: #aaa; flex-wrap: wrap; gap: 8px; }
+    .btn-share { background: #2a2a2a; border: 1px solid #444; color: #eee; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: 0.2s; }
+    .btn-share:hover { background: #3a3a3a; color: #fff; }
 
     /* Barra lateral */
     .sidebar { background: #181818; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px; height: fit-content; max-height: 85vh; }
     .sidebar-controls { display: flex; flex-direction: column; gap: 10px; }
     .search-input { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #333; background: #222; color: #fff; font-size: 0.9rem; }
+    .search-input:focus { outline: none; border-color: #555; }
     .categories-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-    .cat-pill { font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; background: #262626; color: #aaa; border: none; cursor: pointer; white-space: nowrap; }
+    .cat-pill { font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; background: #262626; color: #aaa; border: none; cursor: pointer; white-space: nowrap; transition: 0.2s; }
+    .cat-pill:hover { background: #333; color: #fff; }
     .cat-pill.active { background: #e50914; color: #fff; }
 
     .toggles-bar { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #bbb; border-top: 1px solid #282828; padding-top: 10px; }
     .toggle-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 
-    .playlist-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+    .playlist-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; max-height: 480px; }
     .clip-card { display: flex; gap: 10px; padding: 8px; border-radius: 8px; background: #222; cursor: pointer; transition: 0.2s; align-items: center; border: 1px solid transparent; }
     .clip-card:hover { background: #2c2c2c; }
     .clip-card.active { border-color: #e50914; background: #2d1818; }
@@ -59,7 +61,7 @@
         <div id="player"></div>
       </div>
       <div class="current-details">
-        <div class="current-title" id="now-title">Seleccioná un clip</div>
+        <div class="current-title" id="now-title">Cargando clips...</div>
         <div class="current-meta">
           <span id="now-time">0:00 - 0:00</span>
           <button class="btn-share" onclick="copyShareLink()">🔗 Copiar enlace directo</button>
@@ -91,13 +93,43 @@
     let monitorTimer = null;
     let selectedCategory = "Todas";
 
-    fetch('./clips.json?t=' + Date.now())
-      .then(r => r.json())
+    // Consulta en tiempo real: lee desde la API de GitHub para evitar la espera de deploy
+    async function fetchClipsRealtime() {
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      const isGitHubPages = window.location.hostname.endsWith('github.io');
+
+      if (isGitHubPages) {
+        const owner = window.location.hostname.split('.')[0];
+        const repo = pathParts[0] || `${owner}.github.io`;
+        try {
+          const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/clips.json`, {
+            headers: { 'Accept': 'application/vnd.github+json' }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const jsonText = decodeURIComponent(escape(atob(data.content)));
+            return JSON.parse(jsonText);
+          }
+        } catch (e) {
+          console.warn("Fallo lectura directa de API de GitHub, recurriendo a archivo estático:", e);
+        }
+      }
+
+      // Fallback: archivo local clips.json con parámetro anti-caché
+      const res = await fetch('./clips.json?nocache=' + Date.now());
+      return await res.json();
+    }
+
+    fetchClipsRealtime()
       .then(data => {
-        allClips = data;
+        allClips = data || [];
         buildCategories();
         filterClips();
         initYouTube();
+      })
+      .catch(err => {
+        console.error("Error al cargar clips:", err);
+        document.getElementById('now-title').innerText = "Error al cargar los clips";
       });
 
     function formatTime(sec) {
@@ -121,10 +153,10 @@
     }
 
     function filterClips() {
-      const term = document.getElementById('search-box').value.toLowerCase();
+      const term = (document.getElementById('search-box').value || '').toLowerCase();
       filteredClips = allClips.filter(c => {
         const matchesCategory = selectedCategory === "Todas" || (c.category || "General") === selectedCategory;
-        const matchesSearch = c.title.toLowerCase().includes(term);
+        const matchesSearch = (c.title || '').toLowerCase().includes(term);
         return matchesCategory && matchesSearch;
       });
       document.getElementById('clip-counter').innerText = `${filteredClips.length} clips`;
@@ -133,6 +165,10 @@
 
     function renderPlaylist() {
       const container = document.getElementById('playlist-container');
+      if (filteredClips.length === 0) {
+        container.innerHTML = '<p style="color:#777; font-size:0.85rem; padding:10px;">No se encontraron clips.</p>';
+        return;
+      }
       container.innerHTML = filteredClips.map((clip, idx) => `
         <div class="clip-card ${idx === currentIndex ? 'active' : ''}" onclick="playClip(${idx})">
           <img class="clip-thumb" src="https://img.youtube.com/vi/${clip.id}/mqdefault.jpg" alt="thumb">
@@ -145,15 +181,17 @@
     }
 
     function initYouTube() {
-      const tag = document.createElement('script');
-      tag.src = "https://www.youtube.com/iframe_api";
-      document.body.appendChild(tag);
+      if (window.YT && window.YT.Player) {
+        onYouTubeIframeAPIReady();
+      } else {
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.body.appendChild(tag);
+      }
     }
 
     window.onYouTubeIframeAPIReady = function() {
-      if (filteredClips.length === 0) return;
-      
-      // Chequear si viene un clip referenciado en el hash (#clip-X)
+      if (!filteredClips || filteredClips.length === 0) return;
       const hash = window.location.hash.replace('#clip-', '');
       const initialIdx = hash && !isNaN(hash) && filteredClips[parseInt(hash)] ? parseInt(hash) : 0;
       loadClip(initialIdx);
@@ -217,6 +255,7 @@
     }
 
     function copyShareLink() {
+      if (filteredClips.length === 0) return;
       const clip = filteredClips[currentIndex];
       const realIndex = allClips.indexOf(clip);
       const url = `${window.location.origin}${window.location.pathname}#clip-${realIndex}`;
