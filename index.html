@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Biblioteca de Clips</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0f0f0f; color: #f1f1f1; padding: 20px; }
+    .layout { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 380px; gap: 24px; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+    header { max-width: 1200px; margin: 0 auto 20px; display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.4rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .admin-link { color: #888; text-decoration: none; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; background: #222; }
+    .admin-link:hover { color: #fff; background: #333; }
+
+    /* Reproductor */
+    .player-container { position: sticky; top: 20px; }
+    .video-wrapper { position: relative; padding-bottom: 56.25%; height: 0; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+    .video-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+    
+    .current-details { margin-top: 14px; background: #1a1a1a; padding: 16px; border-radius: 10px; }
+    .current-title { font-size: 1.15rem; font-weight: 600; margin-bottom: 6px; }
+    .current-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: #aaa; }
+    .btn-share { background: #2a2a2a; border: 1px solid #444; color: #eee; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+    .btn-share:hover { background: #3a3a3a; }
+
+    /* Barra lateral */
+    .sidebar { background: #181818; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px; height: fit-content; max-height: 85vh; }
+    .sidebar-controls { display: flex; flex-direction: column; gap: 10px; }
+    .search-input { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #333; background: #222; color: #fff; font-size: 0.9rem; }
+    .categories-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+    .cat-pill { font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; background: #262626; color: #aaa; border: none; cursor: pointer; white-space: nowrap; }
+    .cat-pill.active { background: #e50914; color: #fff; }
+
+    .toggles-bar { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #bbb; border-top: 1px solid #282828; padding-top: 10px; }
+    .toggle-label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+    .playlist-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+    .clip-card { display: flex; gap: 10px; padding: 8px; border-radius: 8px; background: #222; cursor: pointer; transition: 0.2s; align-items: center; border: 1px solid transparent; }
+    .clip-card:hover { background: #2c2c2c; }
+    .clip-card.active { border-color: #e50914; background: #2d1818; }
+    .clip-thumb { width: 84px; height: 48px; border-radius: 4px; object-fit: cover; background: #000; flex-shrink: 0; }
+    .clip-info { overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+    .clip-name { font-size: 0.85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .clip-time { font-size: 0.75rem; color: #888; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎬 Colección de Fragmentos</h1>
+    <a href="admin.html" class="admin-link">⚙️ Gestionar</a>
+  </header>
+
+  <div class="layout">
+    <div class="player-container">
+      <div class="video-wrapper">
+        <div id="player"></div>
+      </div>
+      <div class="current-details">
+        <div class="current-title" id="now-title">Seleccioná un clip</div>
+        <div class="current-meta">
+          <span id="now-time">0:00 - 0:00</span>
+          <button class="btn-share" onclick="copyShareLink()">🔗 Copiar enlace directo</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="sidebar-controls">
+        <input type="text" class="search-input" id="search-box" placeholder="Buscar clip..." oninput="filterClips()">
+        <div class="categories-bar" id="category-pills"></div>
+        <div class="toggles-bar">
+          <label class="toggle-label">
+            <input type="checkbox" id="loop-toggle"> Repetir en bucle
+          </label>
+          <span id="clip-counter" style="color: #666;">0 clips</span>
+        </div>
+      </div>
+
+      <div class="playlist-scroll" id="playlist-container"></div>
+    </div>
+  </div>
+
+  <script>
+    let allClips = [];
+    let filteredClips = [];
+    let currentIndex = 0;
+    let player = null;
+    let monitorTimer = null;
+    let selectedCategory = "Todas";
+
+    fetch('./clips.json?t=' + Date.now())
+      .then(r => r.json())
+      .then(data => {
+        allClips = data;
+        buildCategories();
+        filterClips();
+        initYouTube();
+      });
+
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    function buildCategories() {
+      const categories = ["Todas", ...new Set(allClips.map(c => c.category || "General"))];
+      const container = document.getElementById('category-pills');
+      container.innerHTML = categories.map(cat => `
+        <button class="cat-pill ${cat === selectedCategory ? 'active' : ''}" onclick="selectCategory('${cat}')">${cat}</button>
+      `).join('');
+    }
+
+    function selectCategory(cat) {
+      selectedCategory = cat;
+      buildCategories();
+      filterClips();
+    }
+
+    function filterClips() {
+      const term = document.getElementById('search-box').value.toLowerCase();
+      filteredClips = allClips.filter(c => {
+        const matchesCategory = selectedCategory === "Todas" || (c.category || "General") === selectedCategory;
+        const matchesSearch = c.title.toLowerCase().includes(term);
+        return matchesCategory && matchesSearch;
+      });
+      document.getElementById('clip-counter').innerText = `${filteredClips.length} clips`;
+      renderPlaylist();
+    }
+
+    function renderPlaylist() {
+      const container = document.getElementById('playlist-container');
+      container.innerHTML = filteredClips.map((clip, idx) => `
+        <div class="clip-card ${idx === currentIndex ? 'active' : ''}" onclick="playClip(${idx})">
+          <img class="clip-thumb" src="https://img.youtube.com/vi/${clip.id}/mqdefault.jpg" alt="thumb">
+          <div class="clip-info">
+            <span class="clip-name" title="${clip.title}">${clip.title}</span>
+            <span class="clip-time">${formatTime(clip.start)} - ${formatTime(clip.end)} (${clip.category || 'General'})</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function initYouTube() {
+      const tag = document.createElement('script');
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.body.appendChild(tag);
+    }
+
+    window.onYouTubeIframeAPIReady = function() {
+      if (filteredClips.length === 0) return;
+      
+      // Chequear si viene un clip referenciado en el hash (#clip-X)
+      const hash = window.location.hash.replace('#clip-', '');
+      const initialIdx = hash && !isNaN(hash) && filteredClips[parseInt(hash)] ? parseInt(hash) : 0;
+      loadClip(initialIdx);
+    };
+
+    function loadClip(index) {
+      if (!filteredClips[index]) return;
+      currentIndex = index;
+      const clip = filteredClips[index];
+
+      document.getElementById('now-title').innerText = clip.title;
+      document.getElementById('now-time').innerText = `${formatTime(clip.start)} - ${formatTime(clip.end)}`;
+      renderPlaylist();
+
+      if (!player) {
+        player = new YT.Player('player', {
+          videoId: clip.id,
+          playerVars: { start: clip.start, end: clip.end, autoplay: 1, controls: 1 },
+          events: { 'onStateChange': onStateChange }
+        });
+      } else {
+        player.loadVideoById({ videoId: clip.id, startSeconds: clip.start, endSeconds: clip.end });
+      }
+
+      startMonitor(clip.end, clip.start);
+    }
+
+    function startMonitor(endTime, startTime) {
+      clearInterval(monitorTimer);
+      monitorTimer = setInterval(() => {
+        if (player && player.getCurrentTime) {
+          if (player.getCurrentTime() >= endTime) {
+            handleClipEnd(startTime);
+          }
+        }
+      }, 250);
+    }
+
+    function handleClipEnd(startTime) {
+      const isLoop = document.getElementById('loop-toggle').checked;
+      if (isLoop) {
+        player.seekTo(startTime);
+      } else {
+        if (currentIndex + 1 < filteredClips.length) {
+          loadClip(currentIndex + 1);
+        } else {
+          clearInterval(monitorTimer);
+        }
+      }
+    }
+
+    function onStateChange(event) {
+      if (event.data === 0) { // ENDED
+        const currentClip = filteredClips[currentIndex];
+        handleClipEnd(currentClip ? currentClip.start : 0);
+      }
+    }
+
+    function playClip(idx) {
+      loadClip(idx);
+    }
+
+    function copyShareLink() {
+      const clip = filteredClips[currentIndex];
+      const realIndex = allClips.indexOf(clip);
+      const url = `${window.location.origin}${window.location.pathname}#clip-${realIndex}`;
+      navigator.clipboard.writeText(url).then(() => alert("¡Enlace directo al clip copiado!"));
+    }
+  </script>
+</body>
+</html>
