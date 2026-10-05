@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Gestor de Clips</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #121212; color: #e1e1e1; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    a.back { color: #888; text-decoration: none; font-size: 0.9rem; }
+    a.back:hover { color: #fff; }
+
+    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 10px; padding: 20px; }
+    .card h2 { font-size: 1.1rem; margin-bottom: 12px; color: #fff; border-bottom: 1px solid #2a2a2a; padding-bottom: 6px; }
+
+    label { display: block; font-size: 0.8rem; color: #aaa; margin-bottom: 4px; }
+    input { width: 100%; padding: 8px 12px; background: #282828; border: 1px solid #444; border-radius: 6px; color: #fff; margin-bottom: 12px; font-size: 0.9rem; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    button { background: #2b2b2b; color: #fff; border: 1px solid #444; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 0.85rem; }
+    button:hover { background: #383838; }
+    button.primary { background: #e50914; border-color: #e50914; font-weight: 600; }
+    button.primary:hover { background: #b80710; }
+    button.save { background: #238636; border-color: #2ea043; width: 100%; padding: 12px; font-size: 1rem; font-weight: 600; margin-top: 10px; }
+    button.save:hover { background: #2ea043; }
+
+    /* Previsualizador y Capturador de tiempo */
+    #preview-area { margin-top: 14px; display: none; }
+    .preview-box { width: 100%; height: 320px; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px; }
+    .capture-buttons { display: flex; gap: 8px; margin-bottom: 10px; }
+    .capture-buttons button { flex: 1; background: #333; }
+
+    /* Lista arrastrable y ordenable */
+    .clip-row { display: flex; align-items: center; justify-content: space-between; background: #242424; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border: 1px solid #333; cursor: grab; }
+    .clip-row.dragging { opacity: 0.4; }
+    .clip-data { display: flex; align-items: center; gap: 10px; overflow: hidden; }
+    .clip-actions { display: flex; gap: 6px; }
+    .btn-icon { padding: 4px 8px; font-size: 0.8rem; }
+
+    .status { padding: 10px; border-radius: 6px; margin-top: 10px; font-size: 0.9rem; display: none; }
+    .status.ok { background: #1e4620; color: #7ee787; }
+    .status.err { background: #4c1d1d; color: #f85149; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⚙️ Panel de Administración</h1>
+      <a href="index.html" class="back">← Ver Reproductor</a>
+    </header>
+
+    <!-- Credenciales GitHub -->
+    <div class="card">
+      <h2>1. Conexión con GitHub</h2>
+      <div class="grid-2">
+        <div>
+          <label>Usuario / Organización:</label>
+          <input type="text" id="gh-owner" placeholder="ej: mi-usuario">
+        </div>
+        <div>
+          <label>Repositorio:</label>
+          <input type="text" id="gh-repo" placeholder="ej: mis-clips">
+        </div>
+      </div>
+      <label>Personal Access Token (con permiso 'Contents: Read and write'):</label>
+      <input type="password" id="gh-token" placeholder="ghp_xxxxxxxxxxxx">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <button onclick="saveGHConfig()">Guardar en navegador</button>
+        <span id="config-status" style="font-size:0.8rem; color:#7ee787;"></span>
+      </div>
+    </div>
+
+    <!-- Cargar / Editar Clip -->
+    <div class="card">
+      <h2 id="form-mode-title">2. Agregar o Editar Clip</h2>
+      <input type="hidden" id="editing-index" value="-1">
+      
+      <label>URL o ID de YouTube:</label>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="clip-url" placeholder="https://www.youtube.com/watch?v=...">
+        <button type="button" style="height: fit-content;" onclick="loadPreview()">Cargar Video</button>
+      </div>
+
+      <!-- Preview interactivo con captura de tiempo -->
+      <div id="preview-area">
+        <div class="preview-box">
+          <div id="admin-player"></div>
+        </div>
+        <div class="capture-buttons">
+          <button type="button" onclick="captureTimestamp('start')">⏱️ Fijar segundo actual como INICIO</button>
+          <button type="button" onclick="captureTimestamp('end')">⏱️ Fijar segundo actual como FIN</button>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <label>Título del Clip:</label>
+          <input type="text" id="clip-title" placeholder="Ej: Introducción / Solo de guitarra">
+        </div>
+        <div>
+          <label>Categoría / Tag:</label>
+          <input type="text" id="clip-category" placeholder="Ej: Música, Podcast, Estudio">
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <label>Inicio (segundos o MM:SS):</label>
+          <input type="text" id="clip-start" placeholder="00:30">
+        </div>
+        <div>
+          <label>Fin (segundos o MM:SS):</label>
+          <input type="text" id="clip-end" placeholder="01:15">
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button class="primary" id="btn-submit" onclick="submitClipForm()">➕ Guardar en Lista</button>
+        <button type="button" id="btn-cancel-edit" style="display:none;" onclick="cancelEdit()">Cancelar Edición</button>
+      </div>
+    </div>
+
+    <!-- Lista y Ordenamiento -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h2>3. Lista de Clips (<span id="total-count">0</span>)</h2>
+        <div>
+          <button onclick="exportJSON()" style="font-size:0.75rem;">📥 Descargar JSON</button>
+        </div>
+      </div>
+      <p style="font-size:0.8rem; color:#888; margin-bottom:10px;">Podés arrastrar los elementos o usar las flechas para ordenar la lista.</p>
+      
+      <div id="clips-drag-list">Cargando clips...</div>
+
+      <button class="save" onclick="syncWithGitHub()">💾 Publicar Cambios en GitHub Pages</button>
+      <div id="sync-status" class="status"></div>
+    </div>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script>
+    let clips = [];
+    let fileSha = null;
+    let adminPlayer = null;
+
+    // Cargar config guardada
+    document.getElementById('gh-owner').value = localStorage.getItem('c_owner') || '';
+    document.getElementById('gh-repo').value = localStorage.getItem('c_repo') || '';
+    document.getElementById('gh-token').value = localStorage.getItem('c_token') || '';
+
+    function saveGHConfig() {
+      localStorage.setItem('c_owner', document.getElementById('gh-owner').value.trim());
+      localStorage.setItem('c_repo', document.getElementById('gh-repo').value.trim());
+      localStorage.setItem('c_token', document.getElementById('gh-token').value.trim());
+      document.getElementById('config-status').innerText = '✓ Guardado localmente';
+      loadClipsData();
+    }
+
+    function parseTime(val) {
+      if (!val) return 0;
+      const str = val.toString().trim();
+      if (str.includes(':')) {
+        const p = str.split(':').map(Number);
+        return p.length === 2 ? p[0] * 60 + p[1] : p[0] * 3600 + p[1] * 60 + p[2];
+      }
+      return parseInt(str, 10) || 0;
+    }
+
+    function formatTime(s) {
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+    }
+
+    function extractId(url) {
+      const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+      return m ? m[1] : url.trim();
+    }
+
+    /* Player de Admin para captura de tiempos */
+    function loadPreview() {
+      const id = extractId(document.getElementById('clip-url').value);
+      if (!id) return alert('Ingresá una URL de YouTube válida');
+
+      document.getElementById('preview-area').style.display = 'block';
+
+      if (!adminPlayer) {
+        adminPlayer = new YT.Player('admin-player', {
+          videoId: id,
+          height: '100%',
+          width: '100%',
+          playerVars: { controls: 1 }
+        });
+      } else {
+        adminPlayer.loadVideoById(id);
+      }
+    }
+
+    function captureTimestamp(type) {
+      if (!adminPlayer || !adminPlayer.getCurrentTime) {
+        return alert('Cargá y reproducí el video primero.');
+      }
+      const sec = Math.floor(adminPlayer.getCurrentTime());
+      if (type === 'start') document.getElementById('clip-start').value = formatTime(sec);
+      if (type === 'end') document.getElementById('clip-end').value = formatTime(sec);
+    }
+
+    /* Formulario: Alta o Edición */
+    function submitClipForm() {
+      const editIdx = parseInt(document.getElementById('editing-index').value);
+      const title = document.getElementById('clip-title').value.trim();
+      const id = extractId(document.getElementById('clip-url').value);
+      const category = document.getElementById('clip-category').value.trim() || 'General';
+      const start = parseTime(document.getElementById('clip-start').value);
+      const end = parseTime(document.getElementById('clip-end').value);
+
+      if (!title || !id || end <= start) {
+        return alert('Datos incompletos o inválidos: el final debe ser mayor al inicio.');
+      }
+
+      const clipData = { id, title, start, end, category };
+
+      if (editIdx >= 0) {
+        clips[editIdx] = clipData;
+      } else {
+        clips.push(clipData);
+      }
+
+      cancelEdit();
+      renderAdminList();
+    }
+
+    function editClip(idx) {
+      const c = clips[idx];
+      document.getElementById('editing-index').value = idx;
+      document.getElementById('form-mode-title').innerText = `✏️ Editando: "${c.title}"`;
+      document.getElementById('btn-submit').innerText = '✓ Guardar Cambios';
+      document.getElementById('btn-cancel-edit').style.display = 'inline-block';
+
+      document.getElementById('clip-title').value = c.title;
+      document.getElementById('clip-url').value = `https://www.youtube.com/watch?v=${c.id}`;
+      document.getElementById('clip-category').value = c.category || 'General';
+      document.getElementById('clip-start').value = formatTime(c.start);
+      document.getElementById('clip-end').value = formatTime(c.end);
+
+      loadPreview();
+    }
+
+    function cancelEdit() {
+      document.getElementById('editing-index').value = '-1';
+      document.getElementById('form-mode-title').innerText = '2. Agregar Nuevo Clip';
+      document.getElementById('btn-submit').innerText = '➕ Guardar en Lista';
+      document.getElementById('btn-cancel-edit').style.display = 'none';
+
+      document.getElementById('clip-title').value = '';
+      document.getElementById('clip-url').value = '';
+      document.getElementById('clip-category').value = '';
+      document.getElementById('clip-start').value = '';
+      document.getElementById('clip-end').value = '';
+    }
+
+    /* Ordenamiento: flechas y drag & drop */
+    function moveClip(idx, dir) {
+      const target = idx + dir;
+      if (target < 0 || target >= clips.length) return;
+      const item = clips.splice(idx, 1)[0];
+      clips.splice(target, 0, item);
+      renderAdminList();
+    }
+
+    function deleteClip(idx) {
+      if (confirm(`¿Eliminar "${clips[idx].title}"?`)) {
+        clips.splice(idx, 1);
+        renderAdminList();
+      }
+    }
+
+    function renderAdminList() {
+      document.getElementById('total-count').innerText = clips.length;
+      const container = document.getElementById('clips-drag-list');
+      if (clips.length === 0) {
+        container.innerHTML = '<p style="color:#666;">No hay clips en la lista.</p>';
+        return;
+      }
+
+      container.innerHTML = clips.map((c, i) => `
+        <div class="clip-row" draggable="true" data-index="${i}">
+          <div class="clip-data">
+            <span style="color:#666; font-size:0.8rem;">☰</span>
+            <div>
+              <strong>${c.title}</strong>
+              <div style="font-size:0.75rem; color:#aaa;">${formatTime(c.start)} a ${formatTime(c.end)} | <em>${c.category || 'General'}</em></div>
+            </div>
+          </div>
+          <div class="clip-actions">
+            <button class="btn-icon" onclick="moveClip(${i}, -1)">▲</button>
+            <button class="btn-icon" onclick="moveClip(${i}, 1)">▼</button>
+            <button class="btn-icon" onclick="editClip(${i})">✏️</button>
+            <button class="btn-icon" style="color:#ff6b6b;" onclick="deleteClip(${i})">🗑️</button>
+          </div>
+        </div>
+      `).join('');
+
+      initDragEvents();
+    }
+
+    function initDragEvents() {
+      const rows = document.querySelectorAll('.clip-row');
+      let dragSrcIdx = null;
+
+      rows.forEach(row => {
+        row.addEventListener('dragstart', (e) => {
+          dragSrcIdx = parseInt(row.getAttribute('data-index'));
+          row.classList.add('dragging');
+        });
+        row.addEventListener('dragend', () => row.classList.remove('dragging'));
+        row.addEventListener('dragover', (e) => e.preventDefault());
+        row.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const targetIdx = parseInt(row.getAttribute('data-index'));
+          if (dragSrcIdx !== null && dragSrcIdx !== targetIdx) {
+            const moved = clips.splice(dragSrcIdx, 1)[0];
+            clips.splice(targetIdx, 0, moved);
+            renderAdminList();
+          }
+        });
+      });
+    }
+
+    /* Conexión GitHub */
+    async function loadClipsData() {
+      const owner = localStorage.getItem('c_owner');
+      const repo = localStorage.getItem('c_repo');
+      const token = localStorage.getItem('c_token');
+
+      if (!owner || !repo) {
+        const r = await fetch('./clips.json?t=' + Date.now());
+        clips = await r.json();
+        renderAdminList();
+        return;
+      }
+
+      try {
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/clips.json`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          fileSha = data.sha;
+          clips = JSON.parse(decodeURIComponent(escape(atob(data.content))));
+          renderAdminList();
+        }
+      } catch (err) {
+        console.error("Error al cargar:", err);
+      }
+    }
+
+    async function syncWithGitHub() {
+      const owner = localStorage.getItem('c_owner');
+      const repo = localStorage.getItem('c_repo');
+      const token = localStorage.getItem('c_token');
+      const status = document.getElementById('sync-status');
+
+      if (!owner || !repo || !token) {
+        return alert('Configurá y guardá el usuario, repo y token en el paso 1.');
+      }
+
+      status.style.display = 'block';
+      status.className = 'status';
+      status.innerText = 'Publicando en GitHub...';
+
+      const jsonStr = JSON.stringify(clips, null, 2);
+      const base64Content = btoa(unescape(encodeURIComponent(jsonStr)));
+
+      try {
+        const body = { message: "Actualizar lista ordenada de clips", content: base64Content };
+        if (fileSha) body.sha = fileSha;
+
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/clips.json`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/vnd.github+json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body)
+        });
+
+        if (res.ok) {
+          const resData = await res.json();
+          fileSha = resData.content.sha;
+          status.className = 'status ok';
+          status.innerText = '✓ ¡Lista sincronizada y publicada en GitHub Pages con éxito!';
+        } else {
+          const err = await res.json();
+          status.className = 'status err';
+          status.innerText = `Error: ${err.message}`;
+        }
+      } catch (e) {
+        status.className = 'status err';
+        status.innerText = `Fallo de red: ${e.message}`;
+      }
+    }
+
+    function exportJSON() {
+      const blob = new Blob([JSON.stringify(clips, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'clips.json';
+      a.click();
+    }
+
+    loadClipsData();
+  </script>
+</body>
+</html>
