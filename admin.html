@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin - Gestor de Clips</title>
+  <title>Admin - Gestor de Clips (v1.3)</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background: #121212; color: #e1e1e1; padding: 20px; }
     .container { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
     header { display: flex; justify-content: space-between; align-items: center; }
+    .badge-ver { background: #28a745; color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; margin-left: 8px; }
     a.back { color: #888; text-decoration: none; font-size: 0.9rem; }
     a.back:hover { color: #fff; }
 
@@ -26,18 +27,19 @@
     button.save { background: #238636; border-color: #2ea043; width: 100%; padding: 12px; font-size: 1rem; font-weight: 600; margin-top: 10px; }
     button.save:hover { background: #2ea043; }
 
-    /* Mensajes y Avisos Integrados */
+    /* Avisos visuales en página (Cero alerts nativos) */
     .banner { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 12px; display: none; }
     .banner.err { background: #4c1d1d; color: #f85149; border: 1px solid #da3633; }
     .banner.ok { background: #1e4620; color: #7ee787; border: 1px solid #2ea043; }
 
-    /* Preview y Captura */
+    /* Área del reproductor */
     #preview-area { margin-top: 10px; display: none; }
-    .preview-box { width: 100%; height: 320px; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px; }
+    .preview-box { width: 100%; height: 340px; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 10px; position: relative; }
+    .preview-box iframe { width: 100%; height: 100%; border: none; }
     .capture-buttons { display: flex; gap: 8px; margin-bottom: 12px; }
     .capture-buttons button { flex: 1; background: #333; }
 
-    /* Lista arrastrable */
+    /* Lista */
     .clip-row { display: flex; align-items: center; justify-content: space-between; background: #242424; padding: 10px 12px; border-radius: 6px; margin-bottom: 6px; border: 1px solid #333; cursor: grab; }
     .clip-row.dragging { opacity: 0.4; }
     .clip-data { display: flex; align-items: center; gap: 10px; overflow: hidden; }
@@ -48,7 +50,7 @@
 <body>
   <div class="container">
     <header>
-      <h1>⚙️ Panel de Administración</h1>
+      <h1>⚙️ Panel de Administración <span class="badge-ver">v1.3</span></h1>
       <a href="index.html" class="back">← Ver Reproductor</a>
     </header>
 
@@ -78,19 +80,17 @@
       <h2 id="form-mode-title">2. Agregar o Editar Clip</h2>
       <input type="hidden" id="editing-index" value="-1">
 
-      <div id="form-alert" class="banner err"></div>
+      <div id="form-alert" class="banner"></div>
       
       <label>URL o ID de YouTube: (*obligatorio)</label>
       <div style="display: flex; gap: 8px;">
-        <input type="text" id="clip-url" placeholder="Soporta enlaces normales, /live/, /shorts/ o ID" oninput="onUrlInput()">
-        <button type="button" style="height: fit-content;" onclick="loadPreview()">Cargar Video</button>
+        <input type="text" id="clip-url" placeholder="Pegá cualquier link de YouTube (normal, /live/, /shorts/, youtu.be o ID)" oninput="onUrlPaste()">
+        <button type="button" style="height: fit-content; white-space: nowrap;" onclick="loadPreview()">Cargar Video</button>
       </div>
 
       <!-- Preview interactivo con captura de tiempo -->
       <div id="preview-area">
-        <div class="preview-box">
-          <div id="admin-player"></div>
-        </div>
+        <div class="preview-box" id="player-mount-point"></div>
         <div class="capture-buttons">
           <button type="button" onclick="captureTimestamp('start')">⏱️ Fijar segundo actual como INICIO</button>
           <button type="button" onclick="captureTimestamp('end')">⏱️ Fijar segundo actual como FIN</button>
@@ -125,7 +125,7 @@
       </div>
     </div>
 
-    <!-- Lista y Ordenamiento -->
+    <!-- Lista y Guardado -->
     <div class="card">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
         <h2>3. Lista de Clips (<span id="total-count">0</span>)</h2>
@@ -133,7 +133,7 @@
           <button onclick="exportJSON()" style="font-size:0.75rem;">📥 Descargar JSON</button>
         </div>
       </div>
-      <p style="font-size:0.8rem; color:#888; margin-bottom:10px;">Arrastrá las tarjetas o usá las flechas para ordenar la reproducción.</p>
+      <p style="font-size:0.8rem; color:#888; margin-bottom:10px;">Arrastrá los clips o usá las flechas para ordenar la lista.</p>
       
       <div id="clips-drag-list">Cargando clips...</div>
 
@@ -147,6 +147,11 @@
     let clips = [];
     let fileSha = null;
     let adminPlayer = null;
+    let isYtApiReady = false;
+
+    window.onYouTubeIframeAPIReady = function() {
+      isYtApiReady = true;
+    };
 
     // Cargar config guardada
     document.getElementById('gh-owner').value = localStorage.getItem('c_owner') || '';
@@ -189,16 +194,16 @@
       return `${m}:${sec < 10 ? '0' : ''}${sec}`;
     }
 
-    // Extracción tolerante con /watch, /live/, /shorts/, youtu.be y strings directos
+    // Extractor universal (soporta /live/, /shorts/, watch?v=, youtu.be o ID directo de 11 caracteres)
     function extractId(url) {
       if (!url) return '';
       const str = url.trim();
       if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
-      const m = str.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/|shorts\/))([a-zA-Z0-9_-]{11})/);
+      const m = str.match(/(?:v=|\/live\/|\/shorts\/|\/embed\/|\/v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
       return m ? m[1] : '';
     }
 
-    async function onUrlInput() {
+    async function onUrlPaste() {
       clearFormMsg();
       const id = extractId(document.getElementById('clip-url').value);
       if (id && !document.getElementById('clip-title').value.trim()) {
@@ -218,26 +223,51 @@
       clearFormMsg();
       const id = extractId(document.getElementById('clip-url').value);
       if (!id) {
-        return showFormMsg('URL o ID de YouTube inválido. Asegurate de que sea un video válido.');
+        return showFormMsg('URL o ID no reconocido. Pegá un enlace válido de YouTube.');
       }
 
       document.getElementById('preview-area').style.display = 'block';
 
-      if (!adminPlayer) {
-        adminPlayer = new YT.Player('admin-player', {
+      // Reiniciar contenedor para evitar bloqueos del reproductor
+      const mount = document.getElementById('player-mount-point');
+      mount.innerHTML = '<div id="yt-admin-iframe"></div>';
+
+      function initPlayer() {
+        adminPlayer = new YT.Player('yt-admin-iframe', {
           videoId: id,
           height: '100%',
           width: '100%',
-          playerVars: { controls: 1 }
+          playerVars: { controls: 1, rel: 0 },
+          events: {
+            'onError': function(e) {
+              const errMap = {
+                2: 'El ID del video no es válido.',
+                5: 'Error de reproducción HTML5.',
+                100: 'El video no existe o es privado.',
+                101: 'El autor del video bloqueó la reproducción embebida fuera de YouTube.',
+                150: 'El autor del video bloqueó la reproducción embebida fuera de YouTube.'
+              };
+              showFormMsg('Aviso YouTube: ' + (errMap[e.data] || 'No se pudo reproducir este video.'), true);
+            }
+          }
         });
+      }
+
+      if (window.YT && window.YT.Player) {
+        initPlayer();
       } else {
-        adminPlayer.loadVideoById(id);
+        const checkReady = setInterval(() => {
+          if (window.YT && window.YT.Player) {
+            clearInterval(checkReady);
+            initPlayer();
+          }
+        }, 100);
       }
     }
 
     function captureTimestamp(type) {
       if (!adminPlayer || !adminPlayer.getCurrentTime) {
-        return showFormMsg('Cargá y reproducí el video primero para capturar el segundo.');
+        return showFormMsg('Cargá y reproducí el video primero para capturar el tiempo.');
       }
       clearFormMsg();
       const sec = Math.floor(adminPlayer.getCurrentTime());
@@ -248,21 +278,30 @@
     function submitClipForm() {
       clearFormMsg();
       const editIdx = parseInt(document.getElementById('editing-index').value);
-      const id = extractId(document.getElementById('clip-url').value);
+      const rawUrl = document.getElementById('clip-url').value;
+      const id = extractId(rawUrl);
       let title = document.getElementById('clip-title').value.trim();
       const category = document.getElementById('clip-category').value.trim() || 'General';
-      const start = parseTime(document.getElementById('clip-start').value);
-      const end = parseTime(document.getElementById('clip-end').value);
 
-      if (!id) {
-        return showFormMsg('URL o ID de video no reconocido. Pegá una URL válida de YouTube.');
+      const rawStart = document.getElementById('clip-start').value;
+      const rawEnd = document.getElementById('clip-end').value;
+
+      if (!rawUrl || !id) {
+        return showFormMsg('Tenés que ingresar una URL o ID de YouTube válido.');
       }
+
+      if (!rawStart || !rawEnd) {
+        return showFormMsg('Tenés que ingresar los tiempos de inicio y fin.');
+      }
+
+      const start = parseTime(rawStart);
+      const end = parseTime(rawEnd);
 
       if (end <= start) {
         return showFormMsg(`El tiempo de fin (${formatTime(end)}) debe ser mayor al de inicio (${formatTime(start)}).`);
       }
 
-      // Título opcional con fallback automático
+      // Título automático si no se ingresó ninguno
       if (!title) {
         title = `Clip (${formatTime(start)} - ${formatTime(end)})`;
       }
@@ -271,8 +310,10 @@
 
       if (editIdx >= 0) {
         clips[editIdx] = clipData;
+        showFormMsg('✓ Clip modificado correctamente en la lista.', false);
       } else {
         clips.push(clipData);
+        showFormMsg('✓ Clip agregado. Recordá hacer clic en "Publicar Cambios" para guardarlo en GitHub.', false);
       }
 
       cancelEdit();
@@ -297,9 +338,8 @@
     }
 
     function cancelEdit() {
-      clearFormMsg();
       document.getElementById('editing-index').value = '-1';
-      document.getElementById('form-mode-title').innerText = '2. Agregar Nuevo Clip';
+      document.getElementById('form-mode-title').innerText = '2. Agregar o Editar Clip';
       document.getElementById('btn-submit').innerText = '➕ Guardar en Lista';
       document.getElementById('btn-cancel-edit').style.display = 'none';
 
@@ -327,7 +367,7 @@
       document.getElementById('total-count').innerText = clips.length;
       const container = document.getElementById('clips-drag-list');
       if (clips.length === 0) {
-        container.innerHTML = '<p style="color:#666;">No hay clips cargados.</p>';
+        container.innerHTML = '<p style="color:#666;">No hay clips en la lista.</p>';
         return;
       }
 
@@ -357,7 +397,7 @@
       let dragSrcIdx = null;
 
       rows.forEach(row => {
-        row.addEventListener('dragstart', (e) => {
+        row.addEventListener('dragstart', () => {
           dragSrcIdx = parseInt(row.getAttribute('data-index'));
           row.classList.add('dragging');
         });
